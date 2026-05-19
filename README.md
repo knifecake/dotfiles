@@ -1,15 +1,16 @@
 # dotfiles
 
-Shared scripts/configs for macOS machines, installed with [GNU Stow](https://www.gnu.org/software/stow/).
+Shared scripts/configs for macOS and Arch Linux machines, installed with [GNU Stow](https://www.gnu.org/software/stow/).
 
 ## Current packages
 
 - `pi-web-search` → `~/.pi/agent/extensions/web-search`
 - `pi-web-fetch` → `~/.pi/agent/extensions/web-fetch`
+- `tmux` → `~/.config/tmux/tmux.conf`
 
 This package-level layout lets machine-specific files coexist safely. Example: a local-only extension in `~/.pi/agent/extensions/internal-work-tool` is untouched by Stow.
 
-## Quick start (new Mac)
+## Quick start
 
 Clone anywhere:
 
@@ -21,11 +22,13 @@ cd <anywhere-you-like>
 
 What `bootstrap.sh` does:
 
-1. Ensures Xcode Command Line Tools are installed
-2. Ensures Homebrew is installed
-3. Installs dependencies from `Brewfile` (currently `stow`)
-4. Runs Stow with `--no-folding` to link selected packages into `~`
-5. Ensures `~/.dotfiles` points to this clone
+1. Detects macOS vs Arch Linux
+2. Installs dependencies:
+   - macOS: Xcode Command Line Tools, Homebrew, then `brew bundle` from `Brewfile`
+   - Arch Linux: `stow` and `tmux` via `pacman`
+3. Ensures `~/.dotfiles` points to this clone
+4. Removes pre-existing target files only when they are identical to the tracked file, so Stow can link them safely
+5. Runs Stow with `--no-folding` to link selected packages into `~`
 6. Ensures `~/.zshrc` sources `~/.dotfiles/pi.zsh` (managed block)
 
 ## Common commands
@@ -39,24 +42,22 @@ Dry run:
 Install/relink one package:
 
 ```bash
-./bootstrap.sh pi-web-search
+./bootstrap.sh tmux
+```
+
+Install without trying to install packages/dependencies:
+
+```bash
+./bootstrap.sh --skip-deps
 ```
 
 Unlink one package:
 
 ```bash
-./bootstrap.sh --unlink pi-web-search
+./bootstrap.sh --unlink tmux
 ```
 
-If you previously managed a file manually and Stow reports a conflict ("existing target is not owned by stow"), remove that one target and rerun bootstrap. Example:
-
-```bash
-rm ~/.pi/agent/extensions/web-search/index.ts
-./bootstrap.sh pi-web-search
-
-rm ~/.pi/agent/extensions/web-fetch/index.ts
-./bootstrap.sh pi-web-fetch
-```
+If Stow reports a conflict ("existing target is not owned by stow"), compare and move/remove that target, then rerun bootstrap. Identical files are handled automatically.
 
 ## Adding another shared PI extension
 

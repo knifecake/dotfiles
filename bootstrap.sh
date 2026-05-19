@@ -6,6 +6,12 @@ DOTFILES_LINK="$HOME/.dotfiles"
 DEFAULT_PACKAGES=(
   pi-web-search
   pi-web-fetch
+  tmux
+)
+BREWFILE="$DOTFILES_DIR/Brewfile"
+ARCH_PACKAGES=(
+  stow
+  tmux
 )
 
 print_usage() {
@@ -13,16 +19,29 @@ print_usage() {
 Usage: ./bootstrap.sh [options] [package...]
 
 Options:
-  --dry-run   Show what stow would do
-  --unlink    Remove stow links instead of creating/updating them
-  -h, --help  Show this help
+  --dry-run     Show what would change without modifying files
+  --unlink      Remove stow links instead of creating/updating them
+  --skip-deps   Do not install dependencies/package-manager tools
+  -h, --help    Show this help
 
 Examples:
   ./bootstrap.sh
   ./bootstrap.sh --dry-run
+  ./bootstrap.sh tmux
   ./bootstrap.sh pi-web-search pi-web-fetch
-  ./bootstrap.sh --unlink pi-web-search
+  ./bootstrap.sh --unlink tmux
 EOF
+}
+
+as_root() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "Error: need root privileges to install packages, but sudo is not available." >&2
+    exit 1
+  fi
 }
 
 ensure_xcode_clt() {
@@ -53,6 +72,66 @@ load_brew_env() {
   fi
 }
 
+ensure_arch_linux() {
+  if [[ -f /etc/arch-release ]] || command -v pacman >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Error: Linux support is currently Arch Linux only." >&2
+  echo "Install stow/tmux manually and rerun with --skip-deps, or use an Arch-based host." >&2
+  exit 1
+}
+
+ensure_arch_packages() {
+  local missing=()
+  local package
+
+  ensure_arch_linux
+
+  for package in "$@"; do
+    if ! command -v "$package" >/dev/null 2>&1; then
+      missing+=("$package")
+    fi
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    return
+  fi
+
+  echo "Installing Arch packages: ${missing[*]}"
+  as_root pacman -Syu --needed --noconfirm "${missing[@]}"
+}
+
+ensure_dependencies() {
+  case "$(uname -s)" in
+    Darwin)
+      ensure_xcode_clt
+      ensure_homebrew
+      load_brew_env
+      brew bundle --file "$BREWFILE"
+      ;;
+    Linux)
+      ensure_arch_packages "${ARCH_PACKAGES[@]}"
+      ;;
+    *)
+      echo "Unsupported OS: $(uname -s)" >&2
+      echo "Install stow manually, then rerun with --skip-deps." >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_packages() {
+  local package
+
+  for package in "$@"; do
+    if [[ ! -d "$DOTFILES_DIR/$package" ]]; then
+      echo "Error: unknown package '$package' (missing $DOTFILES_DIR/$package)." >&2
+      exit 1
+    fi
+  done
+}
+
 ensure_dotfiles_symlink() {
   if [[ "$dry_run" == "true" ]]; then
     echo "[dry-run] Ensure $DOTFILES_LINK -> $DOTFILES_DIR"
@@ -73,6 +152,26 @@ ensure_dotfiles_symlink() {
   fi
 
   ln -s "$DOTFILES_DIR" "$DOTFILES_LINK"
+}
+
+remove_identical_stow_targets() {
+  local package src prefix rel target
+
+  for package in "$@"; do
+    prefix="$DOTFILES_DIR/$package/"
+    while IFS= read -r -d '' src; do
+      rel="${src#$prefix}"
+      target="$HOME/$rel"
+
+      if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$src" "$target"; then
+        if [[ "$dry_run" == "true" ]]; then
+          echo "[dry-run] Remove identical existing target $target so Stow can link it"
+        else
+          rm "$target"
+        fi
+      fi
+    done < <(find "$DOTFILES_DIR/$package" -type f -print0)
+  done
 }
 
 ensure_zshrc_sources_dotfiles_pi_zsh() {
@@ -114,6 +213,7 @@ ensure_zshrc_sources_dotfiles_pi_zsh() {
 
 mode="link"
 dry_run="false"
+install_deps="true"
 packages=()
 
 while [[ $# -gt 0 ]]; do
@@ -123,6 +223,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --unlink)
       mode="unlink"
+      ;;
+    --skip-deps)
+      install_deps="false"
       ;;
     -h|--help)
       print_usage
@@ -139,14 +242,23 @@ if [[ ${#packages[@]} -eq 0 ]]; then
   packages=("${DEFAULT_PACKAGES[@]}")
 fi
 
-ensure_xcode_clt
-ensure_homebrew
-load_brew_env
+validate_packages "${packages[@]}"
+
+if [[ "$mode" == "link" && "$install_deps" == "true" ]]; then
+  if [[ "$dry_run" == "true" ]]; then
+    case "$(uname -s)" in
+      Darwin) echo "[dry-run] Would ensure macOS dependencies with Homebrew" ;;
+      Linux) echo "[dry-run] Would ensure Arch Linux dependencies with pacman" ;;
+      *) echo "[dry-run] Would check dependencies for unsupported OS: $(uname -s)" ;;
+    esac
+  else
+    ensure_dependencies
+  fi
+fi
 
 if [[ "$mode" == "link" ]]; then
   ensure_dotfiles_symlink
-  
-  brew bundle --file "$DOTFILES_DIR/Brewfile"
+  remove_identical_stow_targets "${packages[@]}"
 fi
 
 stow_args=(--no-folding -t "$HOME")
@@ -160,10 +272,18 @@ else
   stow_args+=(-D)
 fi
 
-(
-  cd "$DOTFILES_DIR"
-  stow "${stow_args[@]}" "${packages[@]}"
-)
+if command -v stow >/dev/null 2>&1; then
+  (
+    cd "$DOTFILES_DIR"
+    stow "${stow_args[@]}" "${packages[@]}"
+  )
+elif [[ "$dry_run" == "true" ]]; then
+  echo "[dry-run] stow is not installed; would run: stow ${stow_args[*]} ${packages[*]}"
+else
+  echo "Error: GNU Stow is not installed or not in PATH." >&2
+  echo "Install stow or rerun without --skip-deps to let bootstrap install it." >&2
+  exit 1
+fi
 
 if [[ "$mode" == "link" ]]; then
   ensure_zshrc_sources_dotfiles_pi_zsh
