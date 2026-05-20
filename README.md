@@ -6,6 +6,7 @@ Shared scripts/configs for macOS and Arch Linux machines, installed with [GNU St
 
 - `pi-web-search` → `~/.pi/agent/extensions/web-search`
 - `pi-web-fetch` → `~/.pi/agent/extensions/web-fetch`
+- `pi-context-denylist` → `~/.pi/agent/extensions/context-denylist` and `~/.pi/context-denylist`
 - `tmux` → `~/.config/tmux/tmux.conf`
 
 This package-level layout lets machine-specific files coexist safely. Example: a local-only extension in `~/.pi/agent/extensions/internal-work-tool` is untouched by Stow.
@@ -58,6 +59,20 @@ Unlink one package:
 ```
 
 If Stow reports a conflict ("existing target is not owned by stow"), compare and move/remove that target, then rerun bootstrap. Identical files are handled automatically.
+
+## Pi context denylist
+
+Edit `~/.pi/context-denylist` with one path/glob per line. Matching `AGENTS.md` context files and skills are filtered out of the model system prompt, but remain readable on demand. Run `/reload` or restart Pi after editing it.
+
+Example:
+
+```text
+~/code/factorial/AGENTS.md
+~/code/factorial/.agents
+**/noisy-skill/**
+```
+
+Note: Pi's startup header may still report denied context/skill files because resource discovery happens before the extension rewrites the prompt for model calls.
 
 ## Adding another shared PI extension
 
