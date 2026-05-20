@@ -1,0 +1,6 @@
+# Pi context denylist. One path/glob per line.
+# Matches are filtered out of the system prompt, but remain readable on demand.
+# Reload Pi (or run /reload) after editing this file.
+
+/Users/elias.hernandis/code/factorial/AGENTS.md
+/Users/elias.hernandis/code/factorial/.agents

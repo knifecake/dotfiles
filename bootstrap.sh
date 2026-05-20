@@ -6,6 +6,7 @@ DOTFILES_LINK="$HOME/.dotfiles"
 DEFAULT_PACKAGES=(
   pi-web-search
   pi-web-fetch
+  pi-context-denylist
   tmux
 )
 BREWFILE="$DOTFILES_DIR/Brewfile"
@@ -28,7 +29,7 @@ Examples:
   ./bootstrap.sh
   ./bootstrap.sh --dry-run
   ./bootstrap.sh tmux
-  ./bootstrap.sh pi-web-search pi-web-fetch
+  ./bootstrap.sh pi-web-search pi-web-fetch pi-context-denylist
   ./bootstrap.sh --unlink tmux
 EOF
 }
