@@ -175,24 +175,26 @@ remove_identical_stow_targets() {
   done
 }
 
-ensure_zshrc_sources_dotfiles_pi_zsh() {
-  local zshrc="$HOME/.zshrc"
-  local marker_start="# >>> dotfiles pi.zsh >>>"
-  local marker_end="# <<< dotfiles pi.zsh <<<"
-  local source_line='[[ -r "$HOME/.dotfiles/pi.zsh" ]] && source "$HOME/.dotfiles/pi.zsh"'
+ensure_shell_rc_sources_dotfiles_file() {
+  local rc_file="$1"
+  local dotfiles_file="$2"
+  local marker_label="$3"
+  local marker_start="# >>> dotfiles $marker_label >>>"
+  local marker_end="# <<< dotfiles $marker_label <<<"
+  local source_line="[[ -r \"\$HOME/.dotfiles/$dotfiles_file\" ]] && source \"\$HOME/.dotfiles/$dotfiles_file\""
   local tmp
 
   if [[ "$dry_run" == "true" ]]; then
-    echo "[dry-run] Ensure $zshrc sources $HOME/.dotfiles/pi.zsh"
+    echo "[dry-run] Ensure $rc_file sources $HOME/.dotfiles/$dotfiles_file"
     return
   fi
 
-  if [[ ! -f "$zshrc" ]]; then
+  if [[ ! -f "$rc_file" ]]; then
     {
       printf "%s\n" "$marker_start"
       printf "%s\n" "$source_line"
       printf "%s\n" "$marker_end"
-    } > "$zshrc"
+    } > "$rc_file"
     return
   fi
 
@@ -201,15 +203,15 @@ ensure_zshrc_sources_dotfiles_pi_zsh() {
     $0 == start { skip = 1; next }
     $0 == end { skip = 0; next }
     skip != 1 { print }
-  ' "$zshrc" > "$tmp"
+  ' "$rc_file" > "$tmp"
 
-  mv "$tmp" "$zshrc"
+  mv "$tmp" "$rc_file"
 
   {
     printf "\n%s\n" "$marker_start"
     printf "%s\n" "$source_line"
     printf "%s\n" "$marker_end"
-  } >> "$zshrc"
+  } >> "$rc_file"
 }
 
 mode="link"
@@ -287,7 +289,9 @@ else
 fi
 
 if [[ "$mode" == "link" ]]; then
-  ensure_zshrc_sources_dotfiles_pi_zsh
+  ensure_shell_rc_sources_dotfiles_file "$HOME/.zshrc" "pi.zsh" "pi.zsh"
+  ensure_shell_rc_sources_dotfiles_file "$HOME/.zshrc" "worktrunk.zsh" "worktrunk.zsh"
+  ensure_shell_rc_sources_dotfiles_file "$HOME/.bashrc" "worktrunk.bash" "worktrunk.bash"
 fi
 
 echo "Done."
