@@ -4,3 +4,5 @@
 
 /Users/elias.hernandis/code/factorial/AGENTS.md
 /Users/elias.hernandis/code/factorial/.agents
+/Users/elias.hernandis/code/factorial.*/AGENTS.md # Worktrees
+/Users/elias.hernandis/code/factorial.*/.agents # Worktrees
