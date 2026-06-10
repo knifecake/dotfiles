@@ -175,6 +175,114 @@ remove_identical_stow_targets() {
   done
 }
 
+find_homebrew_pi_prefix() {
+  local prefix
+
+  for prefix in /opt/homebrew /home/linuxbrew/.linuxbrew; do
+    if [[ -x "$prefix/bin/pi" && -x "$prefix/bin/node" && -x "$prefix/bin/npm" ]]; then
+      printf "%s\n" "$prefix"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+pi_bin_points_to_coding_agent() {
+  local bin_path="$1"
+  local target
+
+  [[ -e "$bin_path" || -L "$bin_path" ]] || return 1
+  target="$(readlink "$bin_path" 2>/dev/null || true)"
+  [[ "$target" == *pi-coding-agent* ]]
+}
+
+cleanup_conflicting_pi_installs() {
+  local brew_prefix mise_node_dir prefix local_prefix
+  local removed="false"
+
+  brew_prefix="$(find_homebrew_pi_prefix || true)"
+  if [[ -z "$brew_prefix" ]]; then
+    return
+  fi
+
+  # If pi was installed globally under mise-managed Node versions, cwd-specific
+  # mise activation can shadow the Homebrew-backed pi wrapper from pi.zsh.
+  mise_node_dir="$HOME/.local/share/mise/installs/node"
+  if [[ -d "$mise_node_dir" ]]; then
+    for prefix in "$mise_node_dir"/*; do
+      [[ -e "$prefix" ]] || continue
+      if pi_bin_points_to_coding_agent "$prefix/bin/pi" || [[ -d "$prefix/lib/node_modules/@mariozechner/pi-coding-agent" || -d "$prefix/lib/node_modules/@earendil-works/pi-coding-agent" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+          echo "[dry-run] Remove conflicting pi install under $prefix"
+        else
+          if pi_bin_points_to_coding_agent "$prefix/bin/pi"; then
+            rm -f "$prefix/bin/pi"
+          fi
+          rm -rf "$prefix/lib/node_modules/@mariozechner/pi-coding-agent"
+          rm -rf "$prefix/lib/node_modules/@earendil-works/pi-coding-agent"
+          rmdir "$prefix/lib/node_modules/@mariozechner" "$prefix/lib/node_modules/@earendil-works" 2>/dev/null || true
+        fi
+        removed="true"
+      fi
+    done
+  fi
+
+  # Also remove the installer fallback location when Homebrew pi is present.
+  local_prefix="$HOME/.local"
+  if pi_bin_points_to_coding_agent "$local_prefix/bin/pi" || [[ -d "$local_prefix/lib/node_modules/@mariozechner/pi-coding-agent" || -d "$local_prefix/lib/node_modules/@earendil-works/pi-coding-agent" ]]; then
+    if [[ "$dry_run" == "true" ]]; then
+      echo "[dry-run] Remove conflicting pi install under $local_prefix"
+    else
+      if pi_bin_points_to_coding_agent "$local_prefix/bin/pi"; then
+        rm -f "$local_prefix/bin/pi"
+      fi
+      rm -rf "$local_prefix/lib/node_modules/@mariozechner/pi-coding-agent"
+      rm -rf "$local_prefix/lib/node_modules/@earendil-works/pi-coding-agent"
+      rmdir "$local_prefix/lib/node_modules/@mariozechner" "$local_prefix/lib/node_modules/@earendil-works" 2>/dev/null || true
+    fi
+    removed="true"
+  fi
+
+  if [[ "$removed" == "true" ]]; then
+    echo "Using Homebrew-backed pi at $brew_prefix/bin/pi"
+  fi
+}
+
+ensure_pi_npm_command() {
+  local brew_prefix settings_file npm_path node_path
+
+  brew_prefix="$(find_homebrew_pi_prefix || true)"
+  if [[ -z "$brew_prefix" ]]; then
+    return
+  fi
+
+  settings_file="$HOME/.pi/agent/settings.json"
+  npm_path="$brew_prefix/bin/npm"
+  node_path="$brew_prefix/bin/node"
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "[dry-run] Ensure $settings_file sets npmCommand to [$npm_path]"
+    return
+  fi
+
+  mkdir -p "${settings_file%/*}"
+  "$node_path" - "$npm_path" "$settings_file" <<'NODE'
+const fs = require("fs");
+const [npmPath, settingsFile] = process.argv.slice(2);
+let settings = {};
+if (fs.existsSync(settingsFile)) {
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+  } catch {
+    settings = {};
+  }
+}
+settings.npmCommand = [npmPath];
+fs.writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+NODE
+}
+
 ensure_shell_rc_sources_dotfiles_file() {
   local rc_file="$1"
   local dotfiles_file="$2"
@@ -261,6 +369,8 @@ fi
 
 if [[ "$mode" == "link" ]]; then
   ensure_dotfiles_symlink
+  cleanup_conflicting_pi_installs
+  ensure_pi_npm_command
   remove_identical_stow_targets "${packages[@]}"
 fi
 
