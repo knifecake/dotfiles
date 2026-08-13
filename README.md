@@ -31,7 +31,9 @@ What `bootstrap.sh` does:
 3. Ensures `~/.dotfiles` points to this clone
 4. Removes pre-existing target files only when they are identical to the tracked file, so Stow can link them safely
 5. Runs Stow with `--no-folding` to link selected packages into `~`
-6. Ensures `~/.zshrc` sources `~/.dotfiles/pi.zsh` and Worktrunk zsh integration, and `~/.bashrc` sources Worktrunk bash integration (managed blocks)
+6. Removes stale/conflicting Pi installs from mise Node and `~/.local` when a Homebrew-backed Pi is present
+7. Pins Pi package operations to Homebrew npm via `~/.pi/agent/settings.json` `npmCommand`
+8. Ensures `~/.zshrc` sources `~/.dotfiles/pi.zsh` and Worktrunk zsh integration, and `~/.bashrc` sources Worktrunk bash integration (managed blocks)
 
 ## Common commands
 
@@ -94,7 +96,7 @@ Update `DEFAULT_PACKAGES` in `bootstrap.sh` if you want it included in the defau
 
 ## Shared shell helpers
 
-- `pi.zsh` contains shared zsh helpers for pi.
+- `pi.zsh` contains shared zsh helpers for pi and pins Pi to Homebrew's Node/npm when available, so mise-selected Node versions do not change Pi's install/update target.
 - `worktrunk.zsh` / `worktrunk.bash` load `wt config shell init ...` for directory switching and completions.
 - `bootstrap.sh` maintains `~/.dotfiles -> <this repo path>`.
 - `bootstrap.sh` injects managed source blocks into `~/.zshrc` and `~/.bashrc`.
