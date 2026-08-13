@@ -1,14 +1,14 @@
 # Shared pi shell helpers (managed by ~/code/dotfiles)
 
-# Prefer Homebrew's pi + node so behavior is consistent across machines.
-if [ -x /opt/homebrew/bin/pi ] && [ -x /opt/homebrew/bin/node ]; then
+# Prefer Homebrew's pi so behavior is consistent across machines.
+if [ -x /opt/homebrew/bin/pi ]; then
   pi() {
-    /opt/homebrew/bin/node /opt/homebrew/bin/pi "$@"
+    /opt/homebrew/bin/pi "$@"
   }
 fi
 
 # Update pi quickly.
-alias pi-update='/opt/homebrew/bin/npm install -g @mariozechner/pi-coding-agent@latest && /opt/homebrew/bin/node /opt/homebrew/bin/pi --version'
+alias pi-update='brew update && brew upgrade pi-coding-agent && brew link --overwrite pi-coding-agent && /opt/homebrew/bin/pi --version'
 
 # Keep machine-specific secrets outside this repo.
 # Example (in ~/.zshrc.local or ~/.config/zsh/local.zsh):
