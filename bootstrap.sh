@@ -181,7 +181,7 @@ remove_identical_stow_targets() {
 find_homebrew_pi_prefix() {
   local prefix
 
-  for prefix in /opt/homebrew /home/linuxbrew/.linuxbrew; do
+  for prefix in /opt/homebrew /usr/local /home/linuxbrew/.linuxbrew; do
     if [[ -x "$prefix/bin/pi" && -x "$prefix/bin/node" && -x "$prefix/bin/npm" ]]; then
       printf "%s\n" "$prefix"
       return 0

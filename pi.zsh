@@ -3,7 +3,7 @@
 # Prefer Homebrew's pi so behavior is consistent across directories.
 # This avoids mise/asdf-selected Node/npm prefixes changing which global pi runs.
 _dotfiles_pi_prefix=""
-for _dotfiles_candidate in /opt/homebrew /home/linuxbrew/.linuxbrew; do
+for _dotfiles_candidate in /opt/homebrew /usr/local /home/linuxbrew/.linuxbrew; do
   if [ -x "$_dotfiles_candidate/bin/pi" ] && [ -x "$_dotfiles_candidate/bin/brew" ]; then
     _dotfiles_pi_prefix="$_dotfiles_candidate"
     break

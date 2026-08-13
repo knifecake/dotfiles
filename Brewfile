@@ -1,4 +1,5 @@
 brew "node"
+brew "pi-coding-agent"
 brew "stow"
 brew "tmux"
 brew "worktrunk"

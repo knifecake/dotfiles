@@ -27,7 +27,7 @@ What `bootstrap.sh` does:
 
 1. Detects macOS vs Arch Linux
 2. Installs dependencies:
-   - macOS: Xcode Command Line Tools, Homebrew, then `brew bundle` from `Brewfile`
+   - macOS: Xcode Command Line Tools, Homebrew, then `brew bundle` from `Brewfile` (including the current `pi-coding-agent` formula)
    - Arch Linux: `stow` and `tmux` via `pacman`
 3. Ensures `~/.dotfiles` points to this clone
 4. Removes pre-existing target files only when they are identical to the tracked file, so Stow can link them safely
@@ -36,6 +36,9 @@ What `bootstrap.sh` does:
 7. Pins Pi package operations to Homebrew npm via `~/.pi/agent/settings.json` `npmCommand`
 8. Ensures configured Pi packages are listed in settings and installed with `pi install`
 9. Ensures `~/.zshrc` sources `~/.dotfiles/pi.zsh` and Worktrunk zsh integration, and `~/.bashrc` sources Worktrunk bash integration (managed blocks)
+
+Open a new shell after the first bootstrap (or run `exec zsh`) so the managed
+`pi` shell function takes effect in the current terminal.
 
 ## Common commands
 
