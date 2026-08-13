@@ -211,7 +211,7 @@ cleanup_conflicting_pi_installs() {
   mise_node_dir="$HOME/.local/share/mise/installs/node"
   if [[ -d "$mise_node_dir" ]]; then
     for prefix in "$mise_node_dir"/*; do
-      [[ -e "$prefix" ]] || continue
+      [[ -d "$prefix" && ! -L "$prefix" ]] || continue
       if pi_bin_points_to_coding_agent "$prefix/bin/pi" || [[ -d "$prefix/lib/node_modules/@mariozechner/pi-coding-agent" || -d "$prefix/lib/node_modules/@earendil-works/pi-coding-agent" ]]; then
         if [[ "$dry_run" == "true" ]]; then
           echo "[dry-run] Remove conflicting pi install under $prefix"
