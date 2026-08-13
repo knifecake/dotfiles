@@ -9,6 +9,9 @@ DEFAULT_PACKAGES=(
   pi-context-denylist
   tmux
 )
+PI_PACKAGES=(
+  "npm:@plannotator/pi-extension"
+)
 BREWFILE="$DOTFILES_DIR/Brewfile"
 ARCH_PACKAGES=(
   stow
@@ -249,27 +252,38 @@ cleanup_conflicting_pi_installs() {
   fi
 }
 
-ensure_pi_npm_command() {
+ensure_pi_settings() {
   local brew_prefix settings_file npm_path node_path
 
   brew_prefix="$(find_homebrew_pi_prefix || true)"
-  if [[ -z "$brew_prefix" ]]; then
+  settings_file="$HOME/.pi/agent/settings.json"
+  npm_path=""
+  node_path=""
+
+  if [[ -n "$brew_prefix" ]]; then
+    npm_path="$brew_prefix/bin/npm"
+    node_path="$brew_prefix/bin/node"
+  elif command -v node >/dev/null 2>&1; then
+    node_path="$(command -v node)"
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    if [[ -n "$npm_path" ]]; then
+      echo "[dry-run] Ensure $settings_file sets npmCommand to [$npm_path]"
+    fi
+    echo "[dry-run] Ensure $settings_file includes Pi packages: ${PI_PACKAGES[*]}"
     return
   fi
 
-  settings_file="$HOME/.pi/agent/settings.json"
-  npm_path="$brew_prefix/bin/npm"
-  node_path="$brew_prefix/bin/node"
-
-  if [[ "$dry_run" == "true" ]]; then
-    echo "[dry-run] Ensure $settings_file sets npmCommand to [$npm_path]"
+  if [[ -z "$node_path" ]]; then
+    echo "Warning: node is not available; skipping Pi settings update for packages: ${PI_PACKAGES[*]}" >&2
     return
   fi
 
   mkdir -p "${settings_file%/*}"
-  "$node_path" - "$npm_path" "$settings_file" <<'NODE'
+  "$node_path" - "$npm_path" "$settings_file" "${PI_PACKAGES[@]}" <<'NODE'
 const fs = require("fs");
-const [npmPath, settingsFile] = process.argv.slice(2);
+const [npmPath, settingsFile, ...packageSources] = process.argv.slice(2);
 let settings = {};
 if (fs.existsSync(settingsFile)) {
   try {
@@ -278,9 +292,84 @@ if (fs.existsSync(settingsFile)) {
     settings = {};
   }
 }
-settings.npmCommand = [npmPath];
+
+if (npmPath) {
+  settings.npmCommand = [npmPath];
+}
+
+function sourceOf(entry) {
+  if (typeof entry === "string") return entry;
+  if (entry && typeof entry.source === "string") return entry.source;
+  return undefined;
+}
+
+function npmName(spec) {
+  if (spec.startsWith("@")) {
+    const slash = spec.indexOf("/");
+    const versionAt = slash === -1 ? -1 : spec.indexOf("@", slash + 1);
+    return versionAt === -1 ? spec : spec.slice(0, versionAt);
+  }
+  const versionAt = spec.indexOf("@");
+  return versionAt === -1 ? spec : spec.slice(0, versionAt);
+}
+
+function identity(source) {
+  if (source.startsWith("npm:")) return `npm:${npmName(source.slice(4))}`;
+  return source;
+}
+
+const packages = Array.isArray(settings.packages) ? settings.packages : [];
+const identities = new Set(packages.map(sourceOf).filter(Boolean).map(identity));
+for (const source of packageSources) {
+  const key = identity(source);
+  if (!identities.has(key)) {
+    packages.push(source);
+    identities.add(key);
+  }
+}
+if (packages.length > 0) {
+  settings.packages = packages;
+}
+
 fs.writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
 NODE
+}
+
+run_pi_command() {
+  local brew_prefix
+
+  brew_prefix="$(find_homebrew_pi_prefix || true)"
+  if [[ -n "$brew_prefix" ]]; then
+    "$brew_prefix/bin/node" "$brew_prefix/bin/pi" "$@"
+    return
+  fi
+
+  if command -v pi >/dev/null 2>&1; then
+    pi "$@"
+    return
+  fi
+
+  return 127
+}
+
+ensure_pi_packages_installed() {
+  local source
+
+  if [[ ${#PI_PACKAGES[@]} -eq 0 ]]; then
+    return
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "[dry-run] Install/reconcile Pi packages with pi install: ${PI_PACKAGES[*]}"
+    return
+  fi
+
+  for source in "${PI_PACKAGES[@]}"; do
+    echo "Installing Pi package $source"
+    if ! run_pi_command install "$source"; then
+      echo "Warning: failed to install Pi package $source; ensure pi is installed and rerun bootstrap." >&2
+    fi
+  done
 }
 
 ensure_shell_rc_sources_dotfiles_file() {
@@ -370,7 +459,8 @@ fi
 if [[ "$mode" == "link" ]]; then
   ensure_dotfiles_symlink
   cleanup_conflicting_pi_installs
-  ensure_pi_npm_command
+  ensure_pi_settings
+  ensure_pi_packages_installed
   remove_identical_stow_targets "${packages[@]}"
 fi
 

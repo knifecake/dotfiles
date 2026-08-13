@@ -7,6 +7,7 @@ Shared scripts/configs for macOS and Arch Linux machines, installed with [GNU St
 - `pi-web-search` → `~/.pi/agent/extensions/web-search`
 - `pi-web-fetch` → `~/.pi/agent/extensions/web-fetch`
 - `pi-context-denylist` → `~/.pi/agent/extensions/context-denylist` and `~/.pi/context-denylist`
+- Pi package `npm:@plannotator/pi-extension` installed via `pi install`
 - `tmux` → `~/.config/tmux/tmux.conf`
 - Worktrunk shell integration is sourced into `~/.zshrc` and `~/.bashrc` from `worktrunk.zsh` / `worktrunk.bash`.
 
@@ -33,7 +34,8 @@ What `bootstrap.sh` does:
 5. Runs Stow with `--no-folding` to link selected packages into `~`
 6. Removes stale/conflicting Pi installs from mise Node and `~/.local` when a Homebrew-backed Pi is present
 7. Pins Pi package operations to Homebrew npm via `~/.pi/agent/settings.json` `npmCommand`
-8. Ensures `~/.zshrc` sources `~/.dotfiles/pi.zsh` and Worktrunk zsh integration, and `~/.bashrc` sources Worktrunk bash integration (managed blocks)
+8. Ensures configured Pi packages are listed in settings and installed with `pi install`
+9. Ensures `~/.zshrc` sources `~/.dotfiles/pi.zsh` and Worktrunk zsh integration, and `~/.bashrc` sources Worktrunk bash integration (managed blocks)
 
 ## Common commands
 
@@ -49,7 +51,7 @@ Install/relink one package:
 ./bootstrap.sh tmux
 ```
 
-Install without trying to install packages/dependencies:
+Install without trying to install system dependencies:
 
 ```bash
 ./bootstrap.sh --skip-deps
@@ -77,9 +79,11 @@ Example:
 
 Note: Pi's startup header may still report denied context/skill files because resource discovery happens before the extension rewrites the prompt for model calls.
 
-## Adding another shared PI extension
+## Adding another shared Pi extension
 
-Create a new package per extension (recommended):
+For published Pi packages, add their source to `PI_PACKAGES` in `bootstrap.sh`.
+
+For local/stowed extensions, create a new package per extension (recommended):
 
 ```text
 <package-name>/
@@ -92,7 +96,7 @@ Then run:
 ./bootstrap.sh <package-name>
 ```
 
-Update `DEFAULT_PACKAGES` in `bootstrap.sh` if you want it included in the default install.
+Update `DEFAULT_PACKAGES` in `bootstrap.sh` if you want a local/stowed extension included in the default install.
 
 ## Shared shell helpers
 
