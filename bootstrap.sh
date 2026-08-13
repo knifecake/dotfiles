@@ -340,7 +340,7 @@ run_pi_command() {
 
   brew_prefix="$(find_homebrew_pi_prefix || true)"
   if [[ -n "$brew_prefix" ]]; then
-    "$brew_prefix/bin/node" "$brew_prefix/bin/pi" "$@"
+    "$brew_prefix/bin/pi" "$@"
     return
   fi
 
