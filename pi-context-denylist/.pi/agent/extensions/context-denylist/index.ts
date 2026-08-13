@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExtensionAPI, Skill } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Skill } from "@earendil-works/pi-coding-agent";
 import { formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
 
 type CompiledPattern = {
@@ -19,9 +19,12 @@ type CompiledPattern = {
 	relative?: string;
 	basename?: string;
 	glob?: RegExp;
+	globDescendant?: RegExp;
 };
 
 const DENYLIST_FILE = path.join(os.homedir(), ".pi", "context-denylist");
+const CONTEXT_FILE_NAMES = new Set(["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]);
+const RESOURCE_WALK_LIMIT = 25_000;
 
 function expandUserPath(input: string): string {
 	let value = input.trim();
@@ -77,16 +80,19 @@ function compilePattern(raw: string, cwd: string): CompiledPattern | null {
 	const relative = path.isAbsolute(expanded) ? undefined : normalized;
 	const hasGlob = /[*?\[\]]/.test(expanded);
 
+	const globPattern = path.isAbsolute(expanded) ? absolute : normalized;
+
 	return {
 		raw,
 		absolute,
 		relative,
 		basename: path.basename(normalized),
-		glob: hasGlob ? globToRegExp(path.isAbsolute(expanded) ? absolute : normalized) : undefined,
+		glob: hasGlob ? globToRegExp(globPattern) : undefined,
+		globDescendant: hasGlob ? globToRegExp(globPattern, { matchDescendants: true }) : undefined,
 	};
 }
 
-function globToRegExp(glob: string): RegExp {
+function globToRegExp(glob: string, options: { matchDescendants?: boolean } = {}): RegExp {
 	let source = "";
 	const value = toPosix(glob);
 
@@ -114,7 +120,8 @@ function globToRegExp(glob: string): RegExp {
 		source += char;
 	}
 
-	return new RegExp(`^(?:${source})$`);
+	const suffix = options.matchDescendants ? "(?:/.*)?" : "";
+	return new RegExp(`^(?:${source})${suffix}$`);
 }
 
 function candidatePaths(candidatePath: string, cwd: string): string[] {
@@ -126,7 +133,11 @@ function candidatePaths(candidatePath: string, cwd: string): string[] {
 function pathMatches(candidatePath: string, pattern: CompiledPattern, cwd: string): boolean {
 	const candidates = candidatePaths(candidatePath, cwd);
 
-	if (pattern.glob) return candidates.some((candidate) => pattern.glob?.test(candidate));
+	if (pattern.glob) {
+		return candidates.some(
+			(candidate) => pattern.glob?.test(candidate) || pattern.globDescendant?.test(candidate),
+		);
+	}
 
 	for (const patternPath of [pattern.absolute, pattern.relative].filter(Boolean) as string[]) {
 		const normalized = toPosix(path.normalize(patternPath));
@@ -141,6 +152,144 @@ function pathMatches(candidatePath: string, pattern: CompiledPattern, cwd: strin
 
 function isDenied(paths: string[], patterns: CompiledPattern[], cwd: string): boolean {
 	return paths.some((candidatePath) => patterns.some((pattern) => pathMatches(candidatePath, pattern, cwd)));
+}
+
+function ancestorDirs(start: string): string[] {
+	const dirs: string[] = [];
+	let current = path.resolve(start);
+	const root = path.resolve("/");
+
+	while (true) {
+		dirs.push(current);
+		if (current === root) break;
+		const parent = path.resolve(current, "..");
+		if (parent === current) break;
+		current = parent;
+	}
+
+	return dirs;
+}
+
+function isSameOrWithin(child: string, parent: string): boolean {
+	const relativePath = path.relative(parent, child);
+	return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function isRelatedToCwd(candidatePath: string, cwd: string): boolean {
+	const comparisonPath = fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()
+		? path.dirname(candidatePath)
+		: candidatePath;
+	return isSameOrWithin(comparisonPath, cwd) || isSameOrWithin(cwd, comparisonPath);
+}
+
+function patternSearchRoots(pattern: CompiledPattern, cwd: string): string[] {
+	const patternPath = pattern.absolute;
+	if (!patternPath) return [];
+	if (!pattern.glob) return isRelatedToCwd(patternPath, cwd) ? [patternPath] : [];
+
+	const roots = new Set<string>();
+	for (const dir of ancestorDirs(cwd)) {
+		for (const filename of CONTEXT_FILE_NAMES) {
+			const candidate = path.join(dir, filename);
+			if (pathMatches(candidate, pattern, cwd)) roots.add(candidate);
+		}
+
+		for (const candidate of [
+			path.join(dir, ".agents"),
+			path.join(dir, ".agents", "skills"),
+			path.join(dir, ".pi", "skills"),
+		]) {
+			if (pathMatches(candidate, pattern, cwd)) roots.add(candidate);
+		}
+	}
+
+	return Array.from(roots);
+}
+
+function addDeniedResourceFile(
+	filePath: string,
+	patterns: CompiledPattern[],
+	cwd: string,
+	files: Set<string>,
+	options: { includeContextFiles: boolean },
+): void {
+	const name = path.basename(filePath);
+	if (name !== "SKILL.md" && (!options.includeContextFiles || !CONTEXT_FILE_NAMES.has(name))) return;
+	if (isDenied([filePath, path.dirname(filePath)], patterns, cwd)) {
+		files.add(normalizeAbsolute(filePath, cwd));
+	}
+}
+
+function walkDeniedResourceFiles(root: string, patterns: CompiledPattern[], cwd: string, files: Set<string>): void {
+	const stack = [root];
+	let visited = 0;
+
+	while (stack.length > 0 && visited < RESOURCE_WALK_LIMIT) {
+		const current = stack.pop();
+		if (!current) continue;
+		visited += 1;
+
+		let stats: fs.Stats;
+		try {
+			stats = fs.statSync(current);
+		} catch {
+			continue;
+		}
+
+		if (stats.isFile()) {
+			addDeniedResourceFile(current, patterns, cwd, files, { includeContextFiles: true });
+			continue;
+		}
+		if (!stats.isDirectory()) continue;
+
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(current, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+
+		for (const entry of entries) {
+			if ([".git", "node_modules", "tmp", "vendor"].includes(entry.name)) continue;
+			const fullPath = path.join(current, entry.name);
+			if (entry.isDirectory() || entry.isSymbolicLink()) {
+				stack.push(fullPath);
+				continue;
+			}
+			if (entry.isFile()) {
+				addDeniedResourceFile(fullPath, patterns, cwd, files, { includeContextFiles: false });
+			}
+		}
+	}
+}
+
+function pruneNestedRoots(roots: string[]): string[] {
+	const sorted = roots.map((root) => path.resolve(root)).sort((a, b) => a.length - b.length);
+	const pruned: string[] = [];
+
+	for (const root of sorted) {
+		if (pruned.some((kept) => isSameOrWithin(root, kept))) continue;
+		pruned.push(root);
+	}
+
+	return pruned;
+}
+
+function countDeniedResourceFiles(patterns: CompiledPattern[], cwd: string): number {
+	const files = new Set<string>();
+	const roots = new Set<string>();
+
+	for (const pattern of patterns) {
+		for (const root of patternSearchRoots(pattern, cwd)) {
+			roots.add(root);
+		}
+	}
+
+	for (const root of pruneNestedRoots(Array.from(roots))) {
+		walkDeniedResourceFiles(root, patterns, cwd, files);
+	}
+
+	return files.size;
 }
 
 function removeProjectContextSection(prompt: string): string {
@@ -174,41 +323,75 @@ function insertBeforeCurrentDate(prompt: string, content: string): string {
 	return index === -1 ? `${prompt}${content}` : `${prompt.slice(0, index)}${content}${prompt.slice(index)}`;
 }
 
+function plural(count: number, singular: string): string {
+	return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function updateStatus(ctx: ExtensionContext, deniedFileCount: number, ruleCount: number): void {
+	if (ruleCount === 0) {
+		ctx.ui.setStatus("context-denylist", undefined);
+		return;
+	}
+
+	ctx.ui.setStatus(
+		"context-denylist",
+		ctx.ui.theme.fg("muted", `${plural(deniedFileCount, "file")} / ${plural(ruleCount, "rule")}`),
+	);
+}
+
 export default function contextDenylist(pi: ExtensionAPI) {
 	const rawPatterns = readDenylist();
 	let cwd = process.cwd();
 	let patterns = compilePatterns(rawPatterns, cwd);
+	let deniedResourceFileCount = 0;
+
+	function refreshStatus(ctx: ExtensionContext): void {
+		deniedResourceFileCount = countDeniedResourceFiles(patterns, cwd);
+		updateStatus(ctx, deniedResourceFileCount, patterns.length);
+	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		cwd = ctx.cwd;
 		patterns = compilePatterns(rawPatterns, cwd);
-		if (patterns.length > 0) {
-			ctx.ui.setStatus("context-denylist", ctx.ui.theme.fg("muted", `denylist: ${patterns.length}`));
-		}
+		refreshStatus(ctx);
+	});
+
+	pi.on("resources_discover", async (event, ctx) => {
+		cwd = event.cwd;
+		patterns = compilePatterns(rawPatterns, cwd);
+		refreshStatus(ctx);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		ctx.ui.setStatus("context-denylist", undefined);
 	});
 
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		if (patterns.length === 0) return;
 
 		const promptCwd = event.systemPromptOptions.cwd;
 		if (promptCwd !== cwd) {
 			cwd = promptCwd;
 			patterns = compilePatterns(rawPatterns, cwd);
+			refreshStatus(ctx);
 		}
 
 		const contextFiles = event.systemPromptOptions.contextFiles ?? [];
 		const skills = event.systemPromptOptions.skills ?? [];
+		const deniedFiles = new Set<string>();
 
-		const filteredContextFiles = contextFiles.filter(
-			(contextFile) => !isDenied([contextFile.path], patterns, cwd),
-		);
-		const filteredSkills = skills.filter(
-			(skill: Skill) => !isDenied([skill.filePath, skill.baseDir], patterns, cwd),
-		);
+		const filteredContextFiles = contextFiles.filter((contextFile) => {
+			const denied = isDenied([contextFile.path], patterns, cwd);
+			if (denied) deniedFiles.add(contextFile.path);
+			return !denied;
+		});
+		const filteredSkills = skills.filter((skill: Skill) => {
+			const denied = isDenied([skill.filePath, skill.baseDir], patterns, cwd);
+			if (denied) deniedFiles.add(skill.filePath);
+			return !denied;
+		});
+
+		updateStatus(ctx, Math.max(deniedFiles.size, deniedResourceFileCount), patterns.length);
 
 		if (filteredContextFiles.length === contextFiles.length && filteredSkills.length === skills.length) return;
 
